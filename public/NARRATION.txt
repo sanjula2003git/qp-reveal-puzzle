@@ -1,0 +1,16 @@
+RECORD YOUR OWN NARRATION
+=========================
+
+Save your recording in this folder as:  narration.mp3
+(the app auto-detects it; until then it uses the browser voice)
+
+Suggested script to read aloud:
+
+  "Welcome. This question is hidden on purpose.
+   Click the eye button to rotate the flipped text until it stands upright.
+   Hold the Control key and press R to slide the shapes away and uncover the words.
+   If you move your cursor off the sheet, everything hides again.
+   Read the question carefully, then solve the Python challenge."
+
+.wav or .m4a also work — just rename the file to narration.mp3, or tell me
+the extension and I'll point the app at it.
