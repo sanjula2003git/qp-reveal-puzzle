@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   SLIDE_W, SLIDE_H, SLIDE_BG, FONT_STACK, FONT_PX, LINE_HEIGHT,
   TEXT_COLOR, SHAPE_OUTLINE, stripNoise, SOCIAL_MEDIA,
 } from './slides.js'
 
-const DWELL = 5000 // ms per text box in the spotlight
+// --- reveal mechanic ---------------------------------------------------------
+// TWO hold-to-activate controls that must be used TOGETHER to read the slide:
+//   • TEXT toggle (the "A" button, hold with the mouse / Space) — while held it
+//     flips every scrambled box upright; release and it drops back to the wrong
+//     angle. Never touches the shapes.
+//   • SHAPES control (Ctrl+R held, or the layers button held) — while held it
+//     sends every shape BEHIND the text (shapes stay on screen, they just drop
+//     in z-order) so the buried text comes forward. Release and they cover again.
+// Holding BOTH at once = text forward AND upright = the only way to read it.
+const SHAPE_SCALE = 1.22 // enlarge shapes so they overlap the text (and each other)
 
-// ---- exact PPT shape artwork (translucent; text shows through) --------------
+// exact PPT shape artwork (translucent; text shows through) --------------------
 function ShapeArt({ type, fill }) {
   if (type === 'noSmoking') {
     return (
@@ -32,23 +41,34 @@ function ShapeArt({ type, fill }) {
 
 export default function App() {
   const slide = SOCIAL_MEDIA
-  const nText = slide.texts.length
   const [scale, setScale] = useState(1)
   const [isFs, setIsFs] = useState(false)
-  const [hidden, setHidden] = useState(false)
-  const [eyeOn, setEyeOn] = useState(false)
-  const [focus, setFocus] = useState(-1)
-  const [wob, setWob] = useState({ p: 0, l: 0 }) // shape wobble: phase, level
+  const [locked, setLocked] = useState(false)  // capture attempt → 30s hard lock
+  const [holding, setHolding] = useState(false)       // text toggle held → upright
+  const [shapesBack, setShapesBack] = useState(false) // Ctrl+R held → shapes behind
+  const [lockLeft, setLockLeft] = useState(0)  // seconds remaining on the capture lock
 
   const appRef = useRef(null)
   const stageRef = useRef(null)
-  const blankRef = useRef(0)
-  const shakeRef = useRef(0)
-  const phaseRef = useRef(0)
-  const rafRef = useRef(0)
-  const lastRef = useRef(0)
 
-  // fit slide
+  // live refs so the global key handler never binds stale values
+  const lockLeftRef = useRef(0); lockLeftRef.current = lockLeft
+  const blocked = locked
+  const blockedRef = useRef(false); blockedRef.current = blocked
+
+  // fixed shape geometry (centre + scaled size)
+  const geo = useMemo(() => slide.shapes.map((s) => {
+    const w = s.w * SHAPE_SCALE, h = s.h * SHAPE_SCALE
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2
+    return { cx, cy, w, h, x: cx - w / 2, y: cy - h / 2 }
+  }), [slide])
+
+  // how many boxes are scrambled (need the text toggle held to read them)
+  const nWrong = useMemo(
+    () => slide.texts.filter((t) => (((t.rot % 360) + 360) % 360) !== 0).length,
+    [slide])
+
+  // fit slide to the stage
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
@@ -62,87 +82,109 @@ export default function App() {
     return () => ro.disconnect()
   }, [])
 
-  // spotlight timer
-  useEffect(() => {
-    if (!eyeOn) { setFocus(-1); return }
-    setFocus(0)
-    const id = setInterval(() => setFocus((f) => (f + 1) % nText), DWELL)
-    return () => clearInterval(id)
-  }, [eyeOn, nText])
-
-  // shape wobble loop (rotate + oscillate back & forth), decays when released
-  const ensureWobble = () => {
-    if (rafRef.current) return
-    lastRef.current = 0
-    const step = (ts) => {
-      if (!lastRef.current) lastRef.current = ts
-      const dt = Math.min(0.05, (ts - lastRef.current) / 1000)
-      lastRef.current = ts
-      phaseRef.current += dt
-      shakeRef.current = Math.max(0, shakeRef.current - dt * 1.15)
-      setWob({ p: phaseRef.current, l: shakeRef.current })
-      if (shakeRef.current > 0.002) rafRef.current = requestAnimationFrame(step)
-      else { shakeRef.current = 0; setWob({ p: phaseRef.current, l: 0 }); rafRef.current = 0 }
-    }
-    rafRef.current = requestAnimationFrame(step)
+  // ---- lock / hide helpers ----
+  // capture attempt → hide everything for at least 30s (Resume is dead until then)
+  const lockNow = () => {
+    setLocked(true); setShapesBack(false); setHolding(false); setLockLeft(30)
+    try { navigator.clipboard?.writeText(' ') } catch {}
   }
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
+  const resume = () => { if (lockLeftRef.current === 0 && !document.hidden && document.hasFocus()) setLocked(false) }
 
-  // keys
+  // tick the capture-lock countdown down to 0 while locked
   useEffect(() => {
-    const onKey = (e) => {
+    if (!locked) return
+    const id = setInterval(() => setLockLeft((s) => (s <= 1 ? 0 : s - 1)), 1000)
+    return () => clearInterval(id)
+  }, [locked])
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) appRef.current?.requestFullscreen?.()
+    else document.exitFullscreen?.()
+  }
+
+  // PrintScreen shows up under e.key OR e.code, and (in most Windows browsers)
+  // only on keyup — so we check every angle. Note: the OS may swallow the key
+  // entirely before the page sees it; that's a browser limit (Electron is exact).
+  const isCapture = (e) =>
+    e.key === 'PrintScreen' || e.code === 'PrintScreen' ||
+    e.key === 'Snapshot' || e.keyCode === 44
+
+  // ---- global keys (split keydown / keyup so hold works and nothing double-fires)
+  useEffect(() => {
+    const onDown = (e) => {
       const mod = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
-      if (mod && k === 'r') { e.preventDefault(); if (!hidden) { shakeRef.current = 1; ensureWobble() } return }
+      // capture attempts -> lock the screen
+      if (isCapture(e)) { e.preventDefault(); lockNow(); return }
+      if (e.shiftKey && (e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); lockNow(); return } // Win+Shift+S snip
+      if (locked) { if (e.key === 'Escape') resume(); e.preventDefault(); return } // swallow all while locked
+      // Ctrl+R = HOLD to send shapes behind the text (preventDefault kills the browser reload)
+      if (mod && k === 'r') { e.preventDefault(); if (!blockedRef.current) setShapesBack(true); return }
       if (mod && k === 'f') { e.preventDefault(); toggleFullscreen(); return }
       if (mod && (k === 's' || k === 'p' || k === 'u' || k === 'c')) { e.preventDefault(); return }
-      if (e.key === 'PrintScreen') { blankNow(1000); try { navigator.clipboard?.writeText(' ') } catch {} }
     }
-    window.addEventListener('keydown', onKey, { capture: true })
-    window.addEventListener('keyup', onKey, { capture: true })
+    const onUp = (e) => {
+      const k = e.key.toLowerCase()
+      if (isCapture(e)) { e.preventDefault(); lockNow(); return } // PrintScreen usually only fires keyup
+      // releasing R (or the modifier) lets the shapes cover again
+      if (k === 'r' || k === 'control' || k === 'meta') { e.preventDefault(); setShapesBack(false) }
+    }
+    // listen on window AND document, capture phase, to catch it wherever it lands
+    for (const tgt of [window, document]) {
+      tgt.addEventListener('keydown', onDown, { capture: true })
+      tgt.addEventListener('keyup', onUp, { capture: true })
+    }
     return () => {
-      window.removeEventListener('keydown', onKey, { capture: true })
-      window.removeEventListener('keyup', onKey, { capture: true })
+      for (const tgt of [window, document]) {
+        tgt.removeEventListener('keydown', onDown, { capture: true })
+        tgt.removeEventListener('keyup', onUp, { capture: true })
+      }
     }
-  }, [hidden])
+  }, [locked])
 
-  // capture guard
+  // keep keyboard focus inside the viewer so key events actually reach it
+  // (inside an iframe, keys only fire when the frame is focused)
   useEffect(() => {
-    const away = () => { setHidden(true); setEyeOn(false); shakeRef.current = 0 }
-    const back = () => setHidden(false)
-    const vis = () => (document.hidden ? away() : back())
+    appRef.current?.focus()
+  }, [])
+
+  // Focus loss is the reliable browser signal for a capture attempt: Win+Shift+S,
+  // the Snipping Tool, and PrintScreen-opens-Snip all blur the window. Trip the
+  // FULL 30s lock (not a soft hide) so it can't be dismissed by returning focus.
+  useEffect(() => {
+    const trip = () => lockNow()
+    const vis = () => { if (document.hidden) lockNow() }
     const noMenu = (e) => e.preventDefault()
-    window.addEventListener('blur', away)
-    window.addEventListener('focus', back)
+    window.addEventListener('blur', trip)
     document.addEventListener('visibilitychange', vis)
     window.addEventListener('contextmenu', noMenu)
     return () => {
-      window.removeEventListener('blur', away)
-      window.removeEventListener('focus', back)
+      window.removeEventListener('blur', trip)
       document.removeEventListener('visibilitychange', vis)
       window.removeEventListener('contextmenu', noMenu)
     }
   }, [])
-
-  const blankNow = (ms) => {
-    setHidden(true); setEyeOn(false); shakeRef.current = 0
-    clearTimeout(blankRef.current)
-    blankRef.current = setTimeout(() => { if (!document.hidden && document.hasFocus()) setHidden(false) }, ms)
-  }
 
   useEffect(() => {
     const onFs = () => setIsFs(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', onFs)
     return () => document.removeEventListener('fullscreenchange', onFs)
   }, [])
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) appRef.current?.requestFullscreen?.()
-    else document.exitFullscreen?.()
-  }
-  const toggleEye = () => { if (!hidden) setEyeOn((o) => !o) }
+
+  // never leave the slide readable once the screen is blocked
+  useEffect(() => { if (blocked) { setHolding(false); setShapesBack(false) } }, [blocked])
+
+  // pointer-hold handlers for the two dock buttons (mouse + touch; two fingers = both)
+  const textOn = (e) => { if (e) e.preventDefault(); if (!blocked) setHolding(true) }
+  const textOff = () => setHolding(false)
+  const shapeOn = (e) => { if (e) e.preventDefault(); if (!blocked) setShapesBack(true) }
+  const shapeOff = () => setShapesBack(false)
+
+  const readable = holding && shapesBack
 
   return (
-    <div className={`app${isFs ? ' fs' : ''}`} ref={appRef}>
+    <div className={`app${isFs ? ' fs' : ''}`} ref={appRef} tabIndex={-1}
+      onPointerDown={() => appRef.current?.focus()}>
       <div className="ambient" aria-hidden />
 
       <header className="topbar">
@@ -155,7 +197,7 @@ export default function App() {
         </div>
         <div className="actions">
           <span className="pill"><span className="dotpulse" /> {slide.label}</span>
-          <span className="pill lock" title="Content blanks on capture, blur or tab switch">
+          <span className="pill lock" title="Content locks on capture, blur or tab switch">
             <svg viewBox="0 0 24 24" width="13" height="13"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="currentColor" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="currentColor" /></svg>
             Protected
           </span>
@@ -171,14 +213,13 @@ export default function App() {
         <div className="scaler" style={{ width: SLIDE_W * scale, height: SLIDE_H * scale }}>
           <div className="slide" style={{ width: SLIDE_W, height: SLIDE_H, transform: `scale(${scale})`, backgroundColor: SLIDE_BG }}>
             {slide.texts.map((t, i) => {
-              const focused = i === focus
-              const rot = focused ? 0 : t.rot
+              const rot = holding ? 0 : t.rot   // hold the text toggle to flip every box upright
               return (
-                <div key={t.id} className={`tbox${focused ? ' focused' : ''}`}
+                <div key={t.id} className={`tbox${shapesBack ? ' spotlit' : ''}`}
                   style={{
-                    left: t.x, top: t.y, width: t.w, height: t.h, zIndex: focused ? 20 : 1,
+                    left: t.x, top: t.y, width: t.w, height: t.h, zIndex: shapesBack ? 8 : 1,
                     fontFamily: FONT_STACK, fontSize: FONT_PX, lineHeight: LINE_HEIGHT,
-                    color: TEXT_COLOR, transform: `rotate(${rot}deg) scale(${focused ? 1.03 : 1})`,
+                    color: TEXT_COLOR, transform: `rotate(${rot}deg)`,
                   }}>
                   {t.paras.map((p, k) => <p key={k}>{stripNoise(p)}</p>)}
                 </div>
@@ -186,57 +227,78 @@ export default function App() {
             })}
 
             {slide.shapes.map((s, i) => {
-              const l = wob.l, p = wob.p
-              const rot = Math.sin(p * 6 + i * 2.1) * 16 * l
-              const dx = Math.cos(p * 5 + i * 1.3) * 46 * l
-              const dy = Math.sin(p * 7 + i * 0.7) * 30 * l
+              const g = geo[i]
+              // hold Ctrl+R: shapes drop behind the text but stay exactly where they are
               return (
-                <div key={s.id} className="shape"
-                  style={{ left: s.x, top: s.y, width: s.w, height: s.h, zIndex: 5, transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)` }}>
+                <div key={s.id} className={`shape${shapesBack ? ' back' : ''}`}
+                  style={{ left: g.x, top: g.y, width: g.w, height: g.h, zIndex: shapesBack ? 0 : 5 }}>
                   <ShapeArt type={s.type} fill={s.fill} />
                 </div>
               )
             })}
-
-            {hidden && (
-              <div className="guard">
-                <div className="guardcard">
-                  <svg viewBox="0 0 24 24" width="30" height="30"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#8ee0b6" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#8ee0b6" /></svg>
-                  <b>Content hidden</b>
-                  <small>Return focus to this window to continue</small>
-                </div>
-              </div>
-            )}
           </div>
 
+          {blocked && (
+            <div className="lockscreen hard">
+              <div className="guardcard">
+                <svg viewBox="0 0 24 24" width="34" height="34"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#8ee0b6" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#8ee0b6" /></svg>
+                <b>Screen locked</b>
+                <small>A screen-capture or window switch was detected. Content stays hidden for 30 seconds.</small>
+                <button className="resumebtn" onClick={resume} disabled={lockLeft > 0}>
+                  {lockLeft > 0 ? `Resume in ${lockLeft}s` : 'Resume'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="hud">
-            <button className={`eyebtn${eyeOn ? ' active' : ''}`} onClick={toggleEye}
-              title="Reveal each box for 5 seconds" aria-label="Reveal text">
-              <svg viewBox="0 0 40 40" width="21" height="21">
-                <path d="M4 20 C10 10,30 10,36 20 C30 30,10 30,4 20 Z" fill="none" stroke={eyeOn ? '#57d98a' : '#c7d3ea'} strokeWidth="2.6" />
-                <circle cx="20" cy="20" r="6.2" fill={eyeOn ? '#57d98a' : '#c7d3ea'} />
-              </svg>
-            </button>
+            <div className="holdpair">
+              <button className={`eyebtn${holding ? ' active' : ''}`}
+                onPointerDown={textOn} onPointerUp={textOff} onPointerLeave={textOff} onPointerCancel={textOff}
+                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') textOn(e) }}
+                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') textOff() }}
+                onContextMenu={(e) => e.preventDefault()}
+                title="Hold to turn the text upright" aria-label="Hold to turn the text upright" aria-pressed={holding}>
+                <svg viewBox="0 0 40 40" width="20" height="20">
+                  <text x="20" y="27" textAnchor="middle" fontSize="20" fontWeight="800"
+                    fill={holding ? '#57d98a' : '#c7d3ea'}
+                    style={{ transform: holding ? 'none' : 'rotate(180deg)', transformOrigin: '20px 20px', transition: 'transform .4s ease' }}>A</text>
+                </svg>
+              </button>
+              <button className={`eyebtn${shapesBack ? ' active' : ''}`}
+                onPointerDown={shapeOn} onPointerUp={shapeOff} onPointerLeave={shapeOff} onPointerCancel={shapeOff}
+                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') shapeOn(e) }}
+                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') shapeOff() }}
+                onContextMenu={(e) => e.preventDefault()}
+                title="Hold (or hold Ctrl+R) to send the shapes behind the text"
+                aria-label="Hold to send the shapes behind the text" aria-pressed={shapesBack}>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none"
+                  stroke={shapesBack ? '#57d98a' : '#c7d3ea'} strokeWidth="2" strokeLinejoin="round">
+                  <rect x="3.5" y="3.5" width="12" height="12" rx="2.2" />
+                  <rect x="8.5" y="8.5" width="12" height="12" rx="2.2" fill={shapesBack ? 'rgba(87,217,138,0.22)' : 'rgba(10,16,12,0.85)'} />
+                </svg>
+              </button>
+            </div>
             <div className="dockinfo">
-              <div className="dockrow">
-                <span className="docklabel">{eyeOn && focus >= 0 ? `Reading box ${focus + 1} of ${nText}` : 'Click the eye to reveal'}</span>
+              <div className="docklabel">
+                {readable ? 'Readable — keep both held'
+                  : holding ? 'Now hold Ctrl+R (shapes)'
+                  : shapesBack ? 'Now hold the A button (text)'
+                  : `Hold BOTH to read · ${nWrong} scrambled`}
               </div>
-              <div className="steps">
-                {slide.texts.map((t, i) => (
-                  <span key={t.id} className={`step${i === focus ? ' on' : ''}`}>
-                    {i === focus && <i key={focus} />}
-                  </span>
-                ))}
+              <div className="statuspair">
+                <span className={`chip${holding ? ' on' : ''}`}>Text upright</span>
+                <span className={`chip${shapesBack ? ' on' : ''}`}>Shapes back</span>
               </div>
-              <div className="dockhint">Hold <kbd>Ctrl</kbd>+<kbd>R</kbd> to shake the shapes</div>
+              <div className="dockhint">Hold <b>A</b> + <kbd>Ctrl</kbd>+<kbd>R</kbd> together to read</div>
             </div>
           </div>
         </div>
       </main>
 
       <footer className="foot">
-        <span><b>Eye</b> spotlights one box for 5s, flipping the upside-down block upright · <b>Ctrl+R</b> rotates &amp; wobbles the shapes · <b>Ctrl+F</b> fullscreen</span>
-        <span className="hint2">Switch away or try to capture → it hides</span>
+        <span><b>Hold the A button</b> (text upright) <b>and</b> <b>Ctrl+R</b> (shapes behind) together to read · release either and it re-scrambles · <b>Ctrl+F</b> fullscreen</span>
+        <span className="hint2">Capture attempt or leaving the window → locked for 30s</span>
       </footer>
     </div>
   )

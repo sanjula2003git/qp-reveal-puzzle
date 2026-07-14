@@ -24,8 +24,8 @@ export const SOCIAL_MEDIA = {
   index: 1,
   total: 5,
   label: 'Social Media',
-  // Exactly like the PPT: every box upright (rot 0) except the middle block,
-  // which is flipped 180°. The eye spotlight turns the focused box upright.
+  // Anti-cheat scramble: the first and last boxes stay upright; the two middle
+  // blocks are flipped 180°. Holding the toggle turns every box upright to read.
   texts: [
     {
       id: 'head', x: 55.99, y: 42.28, w: 1142.86, h: 67.86, rot: 0,
@@ -39,7 +39,7 @@ export const SOCIAL_MEDIA = {
       ],
     },
     {
-      id: 'resp', x: 55.99, y: 326.83, w: 1133.71, h: 96.94, rot: 0,
+      id: 'resp', x: 55.99, y: 326.83, w: 1133.71, h: 96.94, rot: 180,
       paras: [
         '◇HERE ◉S ☆NO ◇HER RESPONS◉B◉L◉ ◇Y ◉F ☆NYONE CRE☆ ◇ES  ◇HE ☆CCOUN ◇  ◇H☆ ◇ SHOULD GO  ◇O ☆NO ◇HER ROLE KNOWN ☆S SUPER ☆DM◉N  ◇H☆ ◇ PERSON SHOULD ☆PPROVE  ◇HE CRE☆ ◇◉ON OF ☆CCOUN ◇ OF ☆NY PERSON . ',
       ],
