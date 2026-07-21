@@ -117,6 +117,9 @@ body {
 }
 /* sent behind the text: recede a touch so the text clearly reads on top */
 .shape.back { opacity: .8; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.12)) saturate(.88); }
+/* text toggle held: fade the shapes so the decoded text reads through more easily */
+.shape.dim { opacity: .5; }
+.shape.back.dim { opacity: .32; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.1)) saturate(.85); }
 
 /* ---------- lock / capture guard ---------- */
 .lockscreen {

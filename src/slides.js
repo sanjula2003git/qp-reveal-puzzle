@@ -13,10 +13,16 @@ export const LINE_HEIGHT = 1.2
 export const TEXT_COLOR = '#000000'
 export const SHAPE_OUTLINE = 'rgba(24,45,14,0.7)'
 
-// Letter cipher (☆=A ◉=I ◇=T) kept on purpose; only decorative noise stripped.
+// Letter cipher (☆=A ◉=I ◇=T) kept scrambled by default; only decorative noise stripped.
 const NOISE = /[○●◯◎⊙◌▶▷]/g
 export function stripNoise(s) {
   return s.replace(NOISE, '')
+}
+
+// While the text toggle is held we also decode the cipher glyphs to real letters.
+const CIPHER = { '☆': 'A', '◉': 'I', '◇': 'T' }
+export function decode(s) {
+  return stripNoise(s).replace(/[☆◉◇]/g, (ch) => CIPHER[ch] || ch)
 }
 
 export const SOCIAL_MEDIA = {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   SLIDE_W, SLIDE_H, SLIDE_BG, FONT_STACK, FONT_PX, LINE_HEIGHT,
-  TEXT_COLOR, SHAPE_OUTLINE, stripNoise, SOCIAL_MEDIA,
+  TEXT_COLOR, SHAPE_OUTLINE, stripNoise, decode, SOCIAL_MEDIA,
 } from './slides.js'
 
 // --- reveal mechanic ---------------------------------------------------------
@@ -221,7 +221,7 @@ export default function App() {
                     fontFamily: FONT_STACK, fontSize: FONT_PX, lineHeight: LINE_HEIGHT,
                     color: TEXT_COLOR, transform: `rotate(${rot}deg)`,
                   }}>
-                  {t.paras.map((p, k) => <p key={k}>{stripNoise(p)}</p>)}
+                  {t.paras.map((p, k) => <p key={k}>{holding ? decode(p) : stripNoise(p)}</p>)}
                 </div>
               )
             })}
@@ -230,7 +230,7 @@ export default function App() {
               const g = geo[i]
               // hold Ctrl+R: shapes drop behind the text but stay exactly where they are
               return (
-                <div key={s.id} className={`shape${shapesBack ? ' back' : ''}`}
+                <div key={s.id} className={`shape${shapesBack ? ' back' : ''}${holding ? ' dim' : ''}`}
                   style={{ left: g.x, top: g.y, width: g.w, height: g.h, zIndex: shapesBack ? 0 : 5 }}>
                   <ShapeArt type={s.type} fill={s.fill} />
                 </div>
