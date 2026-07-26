@@ -1,305 +1,443 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  SLIDE_W, SLIDE_H, SLIDE_BG, FONT_STACK, FONT_PX, LINE_HEIGHT,
-  TEXT_COLOR, SHAPE_OUTLINE, stripNoise, decode, SOCIAL_MEDIA,
-} from './slides.js'
+import { useEffect, useRef, useState } from 'react'
+import CodeMirror from '@uiw/react-codemirror'
+import { python } from '@codemirror/lang-python'
+import { oneDark } from '@codemirror/theme-one-dark'
+import ExamViewer from './ExamViewer.jsx'
+import { QUESTIONS } from './slides.js'
+import { makeCode, submitExam, fetchResult, checkSubmitted } from './api.js'
+import { runPython } from './runner.js'
 
-// --- reveal mechanic ---------------------------------------------------------
-// TWO hold-to-activate controls that must be used TOGETHER to read the slide:
-//   • TEXT toggle (the "A" button, hold with the mouse / Space) — while held it
-//     flips every scrambled box upright; release and it drops back to the wrong
-//     angle. Never touches the shapes.
-//   • SHAPES control (Ctrl+R held, or the layers button held) — while held it
-//     sends every shape BEHIND the text (shapes stay on screen, they just drop
-//     in z-order) so the buried text comes forward. Release and they cover again.
-// Holding BOTH at once = text forward AND upright = the only way to read it.
-const SHAPE_SCALE = 1.22 // enlarge shapes so they overlap the text (and each other)
+const EXAM_LIMIT_SEC = 75 * 60 // 1 hour 15 minutes
 
-// exact PPT shape artwork (translucent; text shows through) --------------------
-function ShapeArt({ type, fill }) {
-  if (type === 'noSmoking') {
-    return (
-      <svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden preserveAspectRatio="none">
-        <defs><clipPath id="nsclip"><circle cx="50" cy="50" r="49" /></clipPath></defs>
-        <path fillRule="evenodd" fill={fill} stroke={SHAPE_OUTLINE} strokeWidth="1.2"
-          d="M50 1 A49 49 0 1 0 50 99 A49 49 0 1 0 50 1 Z M50 12 A38 38 0 1 1 50 88 A38 38 0 1 1 50 12 Z" />
-        <g clipPath="url(#nsclip)">
-          <rect x="4" y="44" width="92" height="12" fill={fill} transform="rotate(-45 50 50)" />
-        </g>
-      </svg>
-    )
+// h:mm:ss when over an hour, else mm:ss
+function hms(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec))
+  const h = Math.floor(s / 3600)
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+  const sec = String(s % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${m}:${sec}` : `${m}:${sec}`
+}
+
+// The whole app is a tiny screen machine:
+//   welcome → exam → done   (submitting an answer)
+//   welcome ⇄ result        (checking marks later)
+// The anti-cheat viewer (ExamViewer) is only mounted during the exam screen.
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function mmss(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec))
+  const m = Math.floor(s / 60)
+  return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+// ---- Welcome: collect name + email before the exam starts -------------------
+function Welcome({ onStart, onResult }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [err, setErr] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  const start = async () => {
+    const n = name.trim(), e = email.trim().toLowerCase()
+    if (!n) return setErr('Please enter your name.')
+    if (!EMAIL_RE.test(e)) return setErr('Please enter a valid email address.')
+    setErr(''); setChecking(true)
+    // One attempt per email: block starting if this email already submitted.
+    try {
+      if (await checkSubmitted(e)) {
+        setChecking(false)
+        return setErr('This email has already taken the exam. Only one attempt is allowed — use "View my result" below to see your marks.')
+      }
+    } catch {
+      // If the check can't reach the server, let them start; the backend still
+      // rejects a duplicate submission, so one-attempt is still guaranteed.
+    }
+    setChecking(false)
+    onStart({ name: n, email: e })
   }
-  const puffs = [[30, 46, 18], [50, 33, 23], [72, 45, 18], [81, 60, 14], [63, 71, 19], [40, 72, 19], [21, 59, 15], [50, 57, 23]]
+
   return (
-    <svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden preserveAspectRatio="none">
-      <circle cx="20" cy="86" r="7" fill={fill} stroke={SHAPE_OUTLINE} strokeWidth="0.8" />
-      <circle cx="12" cy="94" r="4.5" fill={fill} stroke={SHAPE_OUTLINE} strokeWidth="0.8" />
-      {puffs.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={p[2]} fill={fill} />)}
-    </svg>
+    <div className="gate">
+      <div className="ambient" aria-hidden />
+      <div className="gatecard">
+        <aside className="gatehero" aria-hidden>
+          <div className="herorings" />
+          <div className="herotop">
+            <span className="herologo"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M2 12 C5 6,19 6,22 12 C19 18,5 18,2 12 Z" fill="none" stroke="#fff" strokeWidth="2" /><circle cx="12" cy="12" r="3.4" fill="#fff" /></svg></span>
+            <span className="herokicker">Secure Exam</span>
+          </div>
+          <div className="herobody">
+            <h2>Python<br />Assessment</h2>
+            <p>Read the brief, write your Python, run it in the browser, and submit. Calm focus — you have one attempt.</p>
+          </div>
+          <ul className="herofeat">
+            <li><span className="fdot" />Anti-cheat reveal viewer</li>
+            <li><span className="fdot" />1&nbsp;h&nbsp;15&nbsp;m · one attempt per email</li>
+            <li><span className="fdot" />Run &amp; test Python live</li>
+          </ul>
+        </aside>
+
+        <div className="gateform">
+          <div className="formhead">
+            <h1>Welcome</h1>
+            <p className="sub">Enter your details to begin</p>
+          </div>
+
+          <label className="field">
+            <span>Full name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Priya Sharma" autoComplete="name"
+              onKeyDown={(e) => e.key === 'Enter' && start()} />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com" autoComplete="email"
+              onKeyDown={(e) => e.key === 'Enter' && start()} />
+          </label>
+
+          {err && <div className="err">{err}</div>}
+
+          <button className="gatebtn" onClick={start} disabled={checking}>{checking ? 'Checking…' : 'Start exam →'}</button>
+          <p className="note">Your name, email, start &amp; submit times and answer are recorded. A capture attempt or leaving the window locks the question for 30 seconds.</p>
+          <button className="link" onClick={onResult}>Already submitted? View my result</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Exam: viewer + Python code editor, 1h15m countdown, tab-switch penalty --
+// One shared countdown + one-time code across all questions; each question keeps
+// its own code answer. A single Submit sends every answer as one submission.
+// Leaving the tab restarts the exam (answers cleared) but the timer keeps going;
+// at 1h15m it auto-submits and locks.
+function Exam({ student, onDone, onCancel }) {
+  const startedAt = useRef(Date.now())
+  const code = useRef(makeCode())            // one-time code, fixed for this attempt
+  const [answers, setAnswers] = useState(() => QUESTIONS.map(() => ''))
+  const [outputs, setOutputs] = useState(() => QUESTIONS.map(() => null)) // {ok,output}|null per Q
+  const [current, setCurrent] = useState(0)  // which question is on screen
+  const [now, setNow] = useState(Date.now())
+  const [busy, setBusy] = useState(false)
+  const [running, setRunning] = useState(false) // Python is executing / loading
+  const [err, setErr] = useState('')
+  const [restarted, setRestarted] = useState(false) // tab-switch penalty banner
+  const submittedRef = useRef(false)
+
+  // live clock tick
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const elapsed = (now - startedAt.current) / 1000
+  const remaining = Math.max(0, EXAM_LIMIT_SEC - elapsed)
+  const timeUp = remaining <= 0
+  const low = remaining <= 300 && !timeUp // last 5 minutes → warn
+  const q = QUESTIONS[current]
+  const total = QUESTIONS.length
+  const answeredCount = answers.filter((a) => a.trim()).length
+
+  const setAnswer = (val) =>
+    setAnswers((prev) => prev.map((a, i) => (i === current ? val : a)))
+
+  const go = (delta) => setCurrent((c) => Math.min(total - 1, Math.max(0, c + delta)))
+
+  // Run the current question's code in the browser (Pyodide) and show its output.
+  const run = async () => {
+    if (running || timeUp) return
+    const code = answers[current]
+    if (!code.trim()) { setErr('Write some code before running it.'); return }
+    setErr(''); setRunning(true)
+    setOutputs((prev) => prev.map((o, i) => (i === current ? { ok: true, output: 'Running… (first run downloads Python, ~a few seconds)' } : o)))
+    try {
+      const res = await runPython(code)
+      setOutputs((prev) => prev.map((o, i) => (i === current ? res : o)))
+    } catch (e) {
+      setOutputs((prev) => prev.map((o, i) => (i === current ? { ok: false, output: String(e.message || e) } : o)))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const submit = async (auto = false) => {
+    if (submittedRef.current) return
+    if (!auto && answeredCount === 0) return setErr('Answer at least one question before submitting.')
+    submittedRef.current = true
+    setErr(''); setBusy(true)
+    const submittedAt = Date.now()
+    const durationSec = Math.round((submittedAt - startedAt.current) / 1000)
+    // One cell per question (goes into its own Q1..Qn column on the sheet).
+    const qcells = QUESTIONS.map((qq, i) => {
+      const outText = outputs[i] ? outputs[i].output : '(not run)'
+      return `# ${qq.label}\n${answers[i].trim() || '(left blank)'}\n\n--- OUTPUT ---\n${outText}`
+    })
+    try {
+      const res = await submitExam({
+        name: student.name,
+        email: student.email,
+        code: code.current,
+        auto,
+        qcells,
+        startedAt: new Date(startedAt.current).toISOString(),
+        durationSec,
+      })
+      // The server may return a different code (one stable code per email);
+      // show that authoritative code, falling back to the local one.
+      onDone({ code: res.code || code.current, durationSec })
+    } catch (e) {
+      submittedRef.current = false
+      const msg = /already_submitted/.test(e.message || '')
+        ? 'This email has already submitted the exam — only one attempt is allowed.'
+        : (e.message || 'Could not submit. Check your connection and try again.')
+      setErr(msg)
+      setBusy(false)
+    }
+  }
+
+  // reaching the 1h15m limit → auto-submit whatever is there, then lock
+  useEffect(() => {
+    if (timeUp && !submittedRef.current) submit(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp])
+
+  // leaving the tab / window = restart the exam (answers wiped, back to Q1);
+  // the timer is NOT reset, so time keeps running against them.
+  useEffect(() => {
+    const penalize = () => {
+      if (submittedRef.current) return
+      setAnswers(QUESTIONS.map(() => ''))
+      setOutputs(QUESTIONS.map(() => null))
+      setCurrent(0)
+      setRestarted(true)
+    }
+    const onVis = () => { if (document.hidden) penalize() }
+    window.addEventListener('blur', penalize)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('blur', penalize)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
+
+  return (
+    <div className="examstack">
+      <div className="examviewer">
+        <ExamViewer key={q.id} slide={q} qIndex={current} qTotal={total} />
+      </div>
+
+      <aside className="answerbar">
+        {restarted && !timeUp && (
+          <div className="warnbar">
+            ⚠ You left the exam tab — the exam restarted from Question 1 and your answers were cleared. The timer kept running.
+            <button className="link" onClick={() => setRestarted(false)}>Dismiss</button>
+          </div>
+        )}
+        <div className="barhead">
+          <div className="qslider" style={{ '--n': total, '--i': current }}>
+            <span className="qthumb" aria-hidden />
+            {QUESTIONS.map((qq, i) => (
+              <button key={qq.id}
+                className={`qstep${i === current ? ' on' : ''}${answers[i].trim() ? ' done' : ''}`}
+                onClick={() => setCurrent(i)} title={qq.label} disabled={timeUp}>
+                {i + 1}{answers[i].trim() ? <span className="qmark" aria-hidden /> : null}
+              </button>
+            ))}
+          </div>
+          <div className="qtitle" key={current}>Q{current + 1}. {q.label}</div>
+          <div className="barspacer" />
+          <div className="who"><b>{student.name}</b><span>{student.email}</span></div>
+          <div className={`timer${low ? ' low' : ''}${timeUp ? ' up' : ''}`} title="Time remaining (1h 15m limit)">
+            ⏱ {timeUp ? 'Time up' : hms(remaining)}
+          </div>
+        </div>
+
+        <div className={`codewrap${timeUp ? ' locked' : ''}`}>
+          <CodeMirror
+            value={answers[current]}
+            height="100%"
+            theme={oneDark}
+            extensions={[python()]}
+            editable={!timeUp && !busy}
+            onChange={setAnswer}
+            placeholder={`# Write your Python answer for "${q.label}" here\n`}
+            basicSetup={{ lineNumbers: true, highlightActiveLine: !timeUp, tabSize: 4 }}
+          />
+        </div>
+
+        <div className="runrow">
+          <button className="runbtn" onClick={run} disabled={running || busy || timeUp}>
+            {running ? '● Running…' : '▶ Run'}
+          </button>
+          <span className="outlabel">Output</span>
+          {outputs[current] && !running && (
+            <span className={`outstatus ${outputs[current].ok ? 'ok' : 'bad'}`}>
+              {outputs[current].ok ? 'ran ✓' : 'error'}
+            </span>
+          )}
+        </div>
+        <pre className={`outputbox${outputs[current] && !outputs[current].ok ? ' bad' : ''}`}>
+          {outputs[current] ? outputs[current].output : 'Run your code to see its output here. (First run downloads Python — a few seconds.)'}
+        </pre>
+
+        {timeUp && <div className="err">⏱ Time's up — the 1 hour 15 minute limit is over. Your answers were submitted automatically.</div>}
+        {err && <div className="err">{err}</div>}
+
+        <div className="baractions">
+          <button className="navbtn" onClick={() => go(-1)} disabled={busy || timeUp || current === 0}>← Prev</button>
+          <button className="navbtn" onClick={() => go(1)} disabled={busy || timeUp || current === total - 1}>Next →</button>
+          <span className="answered">{answeredCount}/{total} answered</span>
+          <div className="barspacer" />
+          <button className="link" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="gatebtn compact" onClick={() => submit(false)} disabled={busy || timeUp}>
+            {busy ? 'Submitting…' : `Submit exam (${answeredCount}/${total})`}
+          </button>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+// ---- Done: show the code the student must keep -----------------------------
+function Done({ code, durationSec, onResult, onRestart }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  return (
+    <div className="gate">
+      <div className="ambient" aria-hidden />
+      <div className="card">
+        <div className="tick">✓</div>
+        <h1>Answer submitted</h1>
+        <p className="sub">Your response was recorded. Time taken: <b>{mmss(durationSec)}</b>.</p>
+        <p className="note center">Save this code — you'll need it <b>with your email</b> to see your marks:</p>
+        <button className="codebig" onClick={copy} title="Click to copy">
+          {code}<span className="copyhint">{copied ? 'copied ✓' : 'tap to copy'}</span>
+        </button>
+        <button className="gatebtn" onClick={onResult}>View my result →</button>
+        <button className="link" onClick={onRestart}>Back to start</button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Result: email + code → that student's marks only ----------------------
+function Result({ prefill, onBack }) {
+  const [email, setEmail] = useState(prefill?.email || '')
+  const [code, setCode] = useState(prefill?.code || '')
+  const [state, setState] = useState({ status: 'idle' }) // idle | loading | error | not_found | ungraded | graded
+
+  const check = async () => {
+    const e = email.trim().toLowerCase(), c = code.trim().toUpperCase()
+    if (!EMAIL_RE.test(e)) return setState({ status: 'error', msg: 'Enter a valid email.' })
+    if (!c) return setState({ status: 'error', msg: 'Enter your one-time code.' })
+    setState({ status: 'loading' })
+    try {
+      const r = await fetchResult(e, c)
+      if (!r.found) return setState({ status: 'not_found' })
+      if (!r.graded) return setState({ status: 'ungraded', name: r.name })
+      setState({ status: 'graded', name: r.name, marks: r.marks, feedback: r.feedback })
+    } catch (err) {
+      setState({ status: 'error', msg: err.message || 'Lookup failed.' })
+    }
+  }
+
+  return (
+    <div className="gate">
+      <div className="ambient" aria-hidden />
+      <div className="card">
+        <div className="cardhead">
+          <span className="logo"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#ffffff" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#ffffff" /></svg></span>
+          <div>
+            <h1>View my result</h1>
+            <p className="sub">Enter the email &amp; code you used</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Email</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com" onKeyDown={(e) => e.key === 'Enter' && check()} />
+        </label>
+        <label className="field">
+          <span>One-time code</span>
+          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="QP-XXXX" onKeyDown={(e) => e.key === 'Enter' && check()} />
+        </label>
+
+        <button className="gatebtn" onClick={check} disabled={state.status === 'loading'}>
+          {state.status === 'loading' ? 'Checking…' : 'Check result'}
+        </button>
+
+        {state.status === 'error' && <div className="err">{state.msg}</div>}
+        {state.status === 'not_found' && (
+          <div className="result miss">No submission found for that email + code. Check both and try again.</div>
+        )}
+        {state.status === 'ungraded' && (
+          <div className="result pending">
+            <b>Hi {state.name} — received!</b>
+            <span>Your answer is in, but it hasn't been graded yet. Check back later.</span>
+          </div>
+        )}
+        {state.status === 'graded' && (
+          <div className="result graded">
+            <div className="marks"><span>Marks</span><b>{String(state.marks)}</b></div>
+            {state.feedback && <div className="feedback"><span>Feedback</span><p>{state.feedback}</p></div>}
+          </div>
+        )}
+
+        <button className="link" onClick={onBack}>Back to start</button>
+      </div>
+    </div>
   )
 }
 
 export default function App() {
-  const slide = SOCIAL_MEDIA
-  const [scale, setScale] = useState(1)
-  const [isFs, setIsFs] = useState(false)
-  const [locked, setLocked] = useState(false)  // capture attempt → 30s hard lock
-  const [holding, setHolding] = useState(false)       // text toggle held → upright
-  const [shapesBack, setShapesBack] = useState(false) // Ctrl+R held → shapes behind
-  const [lockLeft, setLockLeft] = useState(0)  // seconds remaining on the capture lock
+  const [screen, setScreen] = useState('welcome') // welcome | exam | done | result
+  const [student, setStudent] = useState(null)
+  const [done, setDone] = useState(null)          // { code, durationSec }
 
-  const appRef = useRef(null)
-  const stageRef = useRef(null)
-
-  // live refs so the global key handler never binds stale values
-  const lockLeftRef = useRef(0); lockLeftRef.current = lockLeft
-  const blocked = locked
-  const blockedRef = useRef(false); blockedRef.current = blocked
-
-  // fixed shape geometry (centre + scaled size)
-  const geo = useMemo(() => slide.shapes.map((s) => {
-    const w = s.w * SHAPE_SCALE, h = s.h * SHAPE_SCALE
-    const cx = s.x + s.w / 2, cy = s.y + s.h / 2
-    return { cx, cy, w, h, x: cx - w / 2, y: cy - h / 2 }
-  }), [slide])
-
-  // how many boxes are scrambled (need the text toggle held to read them)
-  const nWrong = useMemo(
-    () => slide.texts.filter((t) => (((t.rot % 360) + 360) % 360) !== 0).length,
-    [slide])
-
-  // fit slide to the stage
+  // let the browser warn before an accidental reload/close mid-exam
   useEffect(() => {
-    const el = stageRef.current
-    if (!el) return
-    const fit = () => {
-      const r = el.getBoundingClientRect()
-      setScale(Math.min(r.width / SLIDE_W, r.height / SLIDE_H))
-    }
-    fit()
-    const ro = new ResizeObserver(fit)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+    if (screen !== 'exam') return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [screen])
 
-  // ---- lock / hide helpers ----
-  // capture attempt → hide everything for at least 30s (Resume is dead until then)
-  const lockNow = () => {
-    setLocked(true); setShapesBack(false); setHolding(false); setLockLeft(30)
-    try { navigator.clipboard?.writeText(' ') } catch {}
+  if (screen === 'exam') {
+    return (
+      <Exam
+        student={student}
+        onDone={(d) => { setDone(d); setScreen('done') }}
+        onCancel={() => setScreen('welcome')}
+      />
+    )
   }
-  const resume = () => { if (lockLeftRef.current === 0 && !document.hidden && document.hasFocus()) setLocked(false) }
-
-  // tick the capture-lock countdown down to 0 while locked
-  useEffect(() => {
-    if (!locked) return
-    const id = setInterval(() => setLockLeft((s) => (s <= 1 ? 0 : s - 1)), 1000)
-    return () => clearInterval(id)
-  }, [locked])
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) appRef.current?.requestFullscreen?.()
-    else document.exitFullscreen?.()
+  if (screen === 'done') {
+    return (
+      <Done
+        code={done.code} durationSec={done.durationSec}
+        onResult={() => setScreen('result')}
+        onRestart={() => { setStudent(null); setDone(null); setScreen('welcome') }}
+      />
+    )
   }
-
-  // PrintScreen shows up under e.key OR e.code, and (in most Windows browsers)
-  // only on keyup — so we check every angle. Note: the OS may swallow the key
-  // entirely before the page sees it; that's a browser limit (Electron is exact).
-  const isCapture = (e) =>
-    e.key === 'PrintScreen' || e.code === 'PrintScreen' ||
-    e.key === 'Snapshot' || e.keyCode === 44
-
-  // ---- global keys (split keydown / keyup so hold works and nothing double-fires)
-  useEffect(() => {
-    const onDown = (e) => {
-      const mod = e.ctrlKey || e.metaKey
-      const k = e.key.toLowerCase()
-      // capture attempts -> lock the screen
-      if (isCapture(e)) { e.preventDefault(); lockNow(); return }
-      if (e.shiftKey && (e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); lockNow(); return } // Win+Shift+S snip
-      if (locked) { if (e.key === 'Escape') resume(); e.preventDefault(); return } // swallow all while locked
-      // Ctrl+R = HOLD to send shapes behind the text (preventDefault kills the browser reload)
-      if (mod && k === 'r') { e.preventDefault(); if (!blockedRef.current) setShapesBack(true); return }
-      if (mod && k === 'f') { e.preventDefault(); toggleFullscreen(); return }
-      if (mod && (k === 's' || k === 'p' || k === 'u' || k === 'c')) { e.preventDefault(); return }
-    }
-    const onUp = (e) => {
-      const k = e.key.toLowerCase()
-      if (isCapture(e)) { e.preventDefault(); lockNow(); return } // PrintScreen usually only fires keyup
-      // releasing R (or the modifier) lets the shapes cover again
-      if (k === 'r' || k === 'control' || k === 'meta') { e.preventDefault(); setShapesBack(false) }
-    }
-    // listen on window AND document, capture phase, to catch it wherever it lands
-    for (const tgt of [window, document]) {
-      tgt.addEventListener('keydown', onDown, { capture: true })
-      tgt.addEventListener('keyup', onUp, { capture: true })
-    }
-    return () => {
-      for (const tgt of [window, document]) {
-        tgt.removeEventListener('keydown', onDown, { capture: true })
-        tgt.removeEventListener('keyup', onUp, { capture: true })
-      }
-    }
-  }, [locked])
-
-  // keep keyboard focus inside the viewer so key events actually reach it
-  // (inside an iframe, keys only fire when the frame is focused)
-  useEffect(() => {
-    appRef.current?.focus()
-  }, [])
-
-  // Focus loss is the reliable browser signal for a capture attempt: Win+Shift+S,
-  // the Snipping Tool, and PrintScreen-opens-Snip all blur the window. Trip the
-  // FULL 30s lock (not a soft hide) so it can't be dismissed by returning focus.
-  useEffect(() => {
-    const trip = () => lockNow()
-    const vis = () => { if (document.hidden) lockNow() }
-    const noMenu = (e) => e.preventDefault()
-    window.addEventListener('blur', trip)
-    document.addEventListener('visibilitychange', vis)
-    window.addEventListener('contextmenu', noMenu)
-    return () => {
-      window.removeEventListener('blur', trip)
-      document.removeEventListener('visibilitychange', vis)
-      window.removeEventListener('contextmenu', noMenu)
-    }
-  }, [])
-
-  useEffect(() => {
-    const onFs = () => setIsFs(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
-
-  // never leave the slide readable once the screen is blocked
-  useEffect(() => { if (blocked) { setHolding(false); setShapesBack(false) } }, [blocked])
-
-  // pointer-hold handlers for the two dock buttons (mouse + touch; two fingers = both)
-  const textOn = (e) => { if (e) e.preventDefault(); if (!blocked) setHolding(true) }
-  const textOff = () => setHolding(false)
-  const shapeOn = (e) => { if (e) e.preventDefault(); if (!blocked) setShapesBack(true) }
-  const shapeOff = () => setShapesBack(false)
-
-  const readable = holding && shapesBack
-
+  if (screen === 'result') {
+    return (
+      <Result
+        prefill={{ email: student?.email, code: done?.code }}
+        onBack={() => setScreen('welcome')}
+      />
+    )
+  }
   return (
-    <div className={`app${isFs ? ' fs' : ''}`} ref={appRef} tabIndex={-1}
-      onPointerDown={() => appRef.current?.focus()}>
-      <div className="ambient" aria-hidden />
-
-      <header className="topbar">
-        <div className="brand">
-          <span className="logo"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 12 C5 6,19 6,22 12 C19 18,5 18,2 12 Z" fill="none" stroke="#0b140d" strokeWidth="2" /><circle cx="12" cy="12" r="3.4" fill="#0b140d" /></svg></span>
-          <div className="brandtext">
-            <h1>Python Question Bank</h1>
-            <span className="subtitle">Secure Reveal · {slide.index + 1} of {slide.total}</span>
-          </div>
-        </div>
-        <div className="actions">
-          <span className="pill"><span className="dotpulse" /> {slide.label}</span>
-          <span className="pill lock" title="Content locks on capture, blur or tab switch">
-            <svg viewBox="0 0 24 24" width="13" height="13"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="currentColor" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="currentColor" /></svg>
-            Protected
-          </span>
-          <button className="iconbtn" onClick={toggleFullscreen} title="Fullscreen (Ctrl+F)">
-            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-            {isFs ? 'Exit' : 'Fullscreen'}
-          </button>
-        </div>
-      </header>
-
-      <main className="stagewrap" ref={stageRef}>
-        <div className="glow" />
-        <div className="scaler" style={{ width: SLIDE_W * scale, height: SLIDE_H * scale }}>
-          <div className="slide" style={{ width: SLIDE_W, height: SLIDE_H, transform: `scale(${scale})`, backgroundColor: SLIDE_BG }}>
-            {slide.texts.map((t, i) => {
-              const rot = holding ? 0 : t.rot   // hold the text toggle to flip every box upright
-              return (
-                <div key={t.id} className={`tbox${shapesBack ? ' spotlit' : ''}`}
-                  style={{
-                    left: t.x, top: t.y, width: t.w, height: t.h, zIndex: shapesBack ? 8 : 1,
-                    fontFamily: FONT_STACK, fontSize: FONT_PX, lineHeight: LINE_HEIGHT,
-                    color: TEXT_COLOR, transform: `rotate(${rot}deg)`,
-                  }}>
-                  {t.paras.map((p, k) => <p key={k}>{holding ? decode(p) : stripNoise(p)}</p>)}
-                </div>
-              )
-            })}
-
-            {slide.shapes.map((s, i) => {
-              const g = geo[i]
-              // hold Ctrl+R: shapes drop behind the text but stay exactly where they are
-              return (
-                <div key={s.id} className={`shape${shapesBack ? ' back' : ''}${holding ? ' dim' : ''}`}
-                  style={{ left: g.x, top: g.y, width: g.w, height: g.h, zIndex: shapesBack ? 0 : 5 }}>
-                  <ShapeArt type={s.type} fill={s.fill} />
-                </div>
-              )
-            })}
-          </div>
-
-          {blocked && (
-            <div className="lockscreen hard">
-              <div className="guardcard">
-                <svg viewBox="0 0 24 24" width="34" height="34"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#8ee0b6" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#8ee0b6" /></svg>
-                <b>Screen locked</b>
-                <small>A screen-capture or window switch was detected. Content stays hidden for 30 seconds.</small>
-                <button className="resumebtn" onClick={resume} disabled={lockLeft > 0}>
-                  {lockLeft > 0 ? `Resume in ${lockLeft}s` : 'Resume'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="hud">
-            <div className="holdpair">
-              <button className={`eyebtn${holding ? ' active' : ''}`}
-                onPointerDown={textOn} onPointerUp={textOff} onPointerLeave={textOff} onPointerCancel={textOff}
-                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') textOn(e) }}
-                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') textOff() }}
-                onContextMenu={(e) => e.preventDefault()}
-                title="Hold to turn the text upright" aria-label="Hold to turn the text upright" aria-pressed={holding}>
-                <svg viewBox="0 0 40 40" width="20" height="20">
-                  <text x="20" y="27" textAnchor="middle" fontSize="20" fontWeight="800"
-                    fill={holding ? '#57d98a' : '#c7d3ea'}
-                    style={{ transform: holding ? 'none' : 'rotate(180deg)', transformOrigin: '20px 20px', transition: 'transform .4s ease' }}>A</text>
-                </svg>
-              </button>
-              <button className={`eyebtn${shapesBack ? ' active' : ''}`}
-                onPointerDown={shapeOn} onPointerUp={shapeOff} onPointerLeave={shapeOff} onPointerCancel={shapeOff}
-                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') shapeOn(e) }}
-                onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') shapeOff() }}
-                onContextMenu={(e) => e.preventDefault()}
-                title="Hold (or hold Ctrl+R) to send the shapes behind the text"
-                aria-label="Hold to send the shapes behind the text" aria-pressed={shapesBack}>
-                <svg viewBox="0 0 24 24" width="19" height="19" fill="none"
-                  stroke={shapesBack ? '#57d98a' : '#c7d3ea'} strokeWidth="2" strokeLinejoin="round">
-                  <rect x="3.5" y="3.5" width="12" height="12" rx="2.2" />
-                  <rect x="8.5" y="8.5" width="12" height="12" rx="2.2" fill={shapesBack ? 'rgba(87,217,138,0.22)' : 'rgba(10,16,12,0.85)'} />
-                </svg>
-              </button>
-            </div>
-            <div className="dockinfo">
-              <div className="docklabel">
-                {readable ? 'Readable — keep both held'
-                  : holding ? 'Now hold Ctrl+R (shapes)'
-                  : shapesBack ? 'Now hold the A button (text)'
-                  : `Hold BOTH to read · ${nWrong} scrambled`}
-              </div>
-              <div className="statuspair">
-                <span className={`chip${holding ? ' on' : ''}`}>Text upright</span>
-                <span className={`chip${shapesBack ? ' on' : ''}`}>Shapes back</span>
-              </div>
-              <div className="dockhint">Hold <b>A</b> + <kbd>Ctrl</kbd>+<kbd>R</kbd> together to read</div>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <footer className="foot">
-        <span><b>Hold the A button</b> (text upright) <b>and</b> <b>Ctrl+R</b> (shapes behind) together to read · release either and it re-scrambles · <b>Ctrl+F</b> fullscreen</span>
-        <span className="hint2">Capture attempt or leaving the window → locked for 30s</span>
-      </footer>
-    </div>
+    <Welcome
+      onStart={(s) => { setStudent(s); setScreen('exam') }}
+      onResult={() => setScreen('result')}
+    />
   )
 }
