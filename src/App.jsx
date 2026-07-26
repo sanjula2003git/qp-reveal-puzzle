@@ -182,7 +182,7 @@ const TUTORIAL_SLIDES = [
   { img: 's3-exam.png', step: 'Step 3 · The exam screen', weight: 41, caption: 'The scrambled question is on the left; your Python editor, a timer, a Rules button and a question slider are on the right.' },
   { img: 's4-reveal.png', step: 'Step 4 · Read the question', weight: 39, caption: 'Click and hold the A button with your mouse 🖱️, and press Ctrl + R on your keyboard ⌨️ — both at the same time. Let go and it scrambles again.' },
   { img: 's5-run.png', step: 'Step 5 · Write & run', weight: 33, caption: 'Type your Python, press ▶ Run to test it, and use the slider or Prev/Next to answer all four questions.' },
-  { img: 's6-done.png', step: 'Step 6 · Submit & results', weight: 41, caption: 'Submit, then save your code. Later use “View my result” with your email + code to see your marks.' },
+  { img: 's6-done.png', step: 'Step 6 · Submit & results', weight: 52, caption: 'Click Submit once — that’s the only thing that saves your answers to the sheet. You’ll get a personal code: save it, then use “View my result” with your email + code to see your marks.' },
 ]
 
 function TutorialModal({ onClose }) {
@@ -266,7 +266,7 @@ function TutorialModal({ onClose }) {
         <div className="tutbar">
           <button className="tutplay" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
           <div className="tuttrack" onClick={seek}><span style={{ width: `${pct}%` }} /></div>
-          <span className="tuttime">{fmt(t)} / {fmt(dur || 105)}</span>
+          <span className="tuttime">{fmt(t)} / {fmt(dur || 109)}</span>
         </div>
         <div className="tutdots">
           {TUTORIAL_SLIDES.map((s, i) => (
