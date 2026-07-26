@@ -113,6 +113,20 @@ const EXAM_RULES = [
   { icon: '✅', title: 'Answer, run & submit', text: 'Write Python on the right, press ▶ Run to test it, slide between the 4 questions, then Submit. Keep the code you get to view your marks.' },
 ]
 
+// Shared rules list — used by the Rules screen and the in-exam Rules popup.
+function RulesList() {
+  return (
+    <ul className="rulelist">
+      {EXAM_RULES.map((r, i) => (
+        <li key={i} className="ruleitem">
+          <span className="ruleicon" aria-hidden>{r.icon}</span>
+          <div><b>{r.title}</b><p>{r.text}</p></div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function Rules({ student, onProceed, onBack }) {
   return (
     <div className="gate">
@@ -125,16 +139,30 @@ function Rules({ student, onProceed, onBack }) {
             <p className="sub">{student?.name ? `${student.name} · ` : ''}please read the exam rules</p>
           </div>
         </div>
-        <ul className="rulelist">
-          {EXAM_RULES.map((r, i) => (
-            <li key={i} className="ruleitem">
-              <span className="ruleicon" aria-hidden>{r.icon}</span>
-              <div><b>{r.title}</b><p>{r.text}</p></div>
-            </li>
-          ))}
-        </ul>
+        <RulesList />
         <button className="gatebtn" onClick={onProceed}>I understand — start exam →</button>
         <button className="link" onClick={onBack}>← Back</button>
+      </div>
+    </div>
+  )
+}
+
+// A dismissible popup showing the rules — toggled from a button during the exam.
+function RulesModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="modalback" onClick={onClose}>
+      <div className="modalcard" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Exam rules">
+        <div className="modalhead">
+          <b>Exam rules</b>
+          <button className="modalx" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <RulesList />
+        <button className="gatebtn compact" onClick={onClose}>Got it</button>
       </div>
     </div>
   )
@@ -156,6 +184,7 @@ function Exam({ student, onDone, onCancel }) {
   const [running, setRunning] = useState(false) // Python is executing / loading
   const [err, setErr] = useState('')
   const [restarted, setRestarted] = useState(false) // tab-switch penalty banner
+  const [showRules, setShowRules] = useState(false) // in-exam rules popup
   const submittedRef = useRef(false)
 
   // live clock tick
@@ -284,6 +313,7 @@ function Exam({ student, onDone, onCancel }) {
           <div className={`timer${low ? ' low' : ''}${timeUp ? ' up' : ''}`} title="Time remaining (1h 15m limit)">
             ⏱ {timeUp ? 'Time up' : hms(remaining)}
           </div>
+          <button className="rulesbtn" onClick={() => setShowRules(true)} title="View the exam rules">📋 Rules</button>
         </div>
 
         <div className={`codewrap${timeUp ? ' locked' : ''}`}>
@@ -328,6 +358,8 @@ function Exam({ student, onDone, onCancel }) {
           </button>
         </div>
       </aside>
+
+      {showRules && <RulesModal onClose={() => setShowRules(false)} />}
     </div>
   )
 }

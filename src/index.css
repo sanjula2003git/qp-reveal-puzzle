@@ -356,6 +356,45 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .ruleitem b { display: block; font-size: 13.5px; font-weight: 720; color: var(--ink); margin-bottom: 2px; }
 .ruleitem p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 
+/* in-exam "Rules" toggle button */
+.rulesbtn {
+  flex: none; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 650;
+  color: var(--accent); white-space: nowrap;
+  padding: 6px 13px; border-radius: 999px;
+  background: rgba(220, 38, 38, 0.07);
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  transition: background .18s, border-color .18s, transform .08s;
+}
+.rulesbtn:hover { background: rgba(220, 38, 38, 0.13); border-color: rgba(220, 38, 38, 0.45); }
+.rulesbtn:active { transform: scale(.96); }
+
+/* rules popup */
+.modalback {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(30, 12, 12, 0.42); backdrop-filter: blur(4px);
+  animation: modalfade .2s ease;
+}
+.modalcard {
+  width: min(520px, 100%); max-height: 88vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 22px clamp(18px, 3vw, 26px);
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 30px 70px -20px rgba(120, 20, 20, 0.5);
+  animation: modalpop .24s cubic-bezier(.22, 1, .36, 1);
+}
+.modalhead { display: flex; align-items: center; justify-content: space-between; }
+.modalhead b { font-size: 17px; font-weight: 780; color: var(--ink); }
+.modalx {
+  cursor: pointer; border: none; background: rgba(0, 0, 0, 0.05);
+  width: 30px; height: 30px; border-radius: 9px; color: var(--muted);
+  font-size: 14px; line-height: 1; transition: background .15s, color .15s;
+}
+.modalx:hover { background: rgba(220, 38, 38, 0.1); color: var(--accent); }
+@keyframes modalfade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalpop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+
 .cardhead { display: flex; align-items: center; gap: 13px; }
 .cardhead h1 { font-size: 20px; margin: 0; font-weight: 750; letter-spacing: .2px; }
 .card h1 { font-size: 22px; margin: 0; font-weight: 760; }
