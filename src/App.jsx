@@ -103,6 +103,43 @@ function Welcome({ onStart, onResult }) {
   )
 }
 
+// ---- Rules: shown after Welcome, before the exam actually starts -----------
+const EXAM_RULES = [
+  { icon: '🔒', title: 'One attempt only', text: 'Each email can take this exam once. You can’t restart or resubmit — so make it count.' },
+  { icon: '⏱️', title: '1 hour 15 minutes', text: 'A live countdown starts the moment you begin. When it reaches zero, your answers are submitted automatically.' },
+  { icon: '🚫', title: 'Stay on this tab', text: 'Leaving or switching the window restarts the exam from Question 1 and clears your answers — and the timer keeps running.' },
+  { icon: '📷', title: 'No screenshots', text: 'Screen-capture attempts (PrintScreen / Snipping Tool) lock the screen. Just read and answer.' },
+  { icon: '👁️', title: 'Reveal each question', text: 'Questions are scrambled. Hold the A button and Ctrl+R (or the ⊞ button) together to read them; release to re-scramble.' },
+  { icon: '✅', title: 'Answer, run & submit', text: 'Write Python on the right, press ▶ Run to test it, slide between the 4 questions, then Submit. Keep the code you get to view your marks.' },
+]
+
+function Rules({ student, onProceed, onBack }) {
+  return (
+    <div className="gate">
+      <div className="ambient" aria-hidden />
+      <div className="card rulescard">
+        <div className="ruleshead">
+          <span className="logo"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M9 11l3 3L22 4" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg></span>
+          <div>
+            <h1>Before you begin</h1>
+            <p className="sub">{student?.name ? `${student.name} · ` : ''}please read the exam rules</p>
+          </div>
+        </div>
+        <ul className="rulelist">
+          {EXAM_RULES.map((r, i) => (
+            <li key={i} className="ruleitem">
+              <span className="ruleicon" aria-hidden>{r.icon}</span>
+              <div><b>{r.title}</b><p>{r.text}</p></div>
+            </li>
+          ))}
+        </ul>
+        <button className="gatebtn" onClick={onProceed}>I understand — start exam →</button>
+        <button className="link" onClick={onBack}>← Back</button>
+      </div>
+    </div>
+  )
+}
+
 // ---- Exam: viewer + Python code editor, 1h15m countdown, tab-switch penalty --
 // One shared countdown + one-time code across all questions; each question keeps
 // its own code answer. A single Submit sends every answer as one submission.
@@ -391,7 +428,7 @@ function Result({ prefill, onBack }) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState('welcome') // welcome | exam | done | result
+  const [screen, setScreen] = useState('welcome') // welcome | rules | exam | done | result
   const [student, setStudent] = useState(null)
   const [done, setDone] = useState(null)          // { code, durationSec }
 
@@ -403,6 +440,15 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [screen])
 
+  if (screen === 'rules') {
+    return (
+      <Rules
+        student={student}
+        onProceed={() => setScreen('exam')}
+        onBack={() => setScreen('welcome')}
+      />
+    )
+  }
   if (screen === 'exam') {
     return (
       <Exam
@@ -431,7 +477,7 @@ export default function App() {
   }
   return (
     <Welcome
-      onStart={(s) => { setStudent(s); setScreen('exam') }}
+      onStart={(s) => { setStudent(s); setScreen('rules') }}
       onResult={() => setScreen('result')}
     />
   )

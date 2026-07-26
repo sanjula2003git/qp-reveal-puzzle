@@ -335,6 +335,27 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   .gatehero .herorings { width: 240px; height: 240px; right: -90px; bottom: -110px; }
 }
 
+/* ---- rules screen ---- */
+.rulescard { width: min(540px, 100%); }
+.ruleshead { display: flex; align-items: center; gap: 13px; }
+.ruleshead h1 { margin: 0; font-size: 22px; font-weight: 760; letter-spacing: -0.2px; }
+.ruleshead .sub { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+.rulelist { list-style: none; margin: 2px 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ruleitem {
+  display: flex; gap: 13px; align-items: flex-start;
+  padding: 12px 14px; border-radius: 14px;
+  background: rgba(220, 38, 38, 0.04);
+  border: 1px solid rgba(220, 38, 38, 0.12);
+}
+.ruleicon {
+  width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+  border-radius: 10px; font-size: 17px; line-height: 1;
+  background: #fff; border: 1px solid rgba(220, 38, 38, 0.18);
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.1);
+}
+.ruleitem b { display: block; font-size: 13.5px; font-weight: 720; color: var(--ink); margin-bottom: 2px; }
+.ruleitem p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
 .cardhead { display: flex; align-items: center; gap: 13px; }
 .cardhead h1 { font-size: 20px; margin: 0; font-weight: 750; letter-spacing: .2px; }
 .card h1 { font-size: 22px; margin: 0; font-weight: 760; }
