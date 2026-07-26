@@ -97,6 +97,7 @@ function Welcome({ onStart, onResult }) {
           <button className="gatebtn" onClick={start} disabled={checking}>{checking ? 'Checking…' : 'Start exam →'}</button>
           <p className="note">Your name, email, start &amp; submit times and answer are recorded. A capture attempt or leaving the window locks the question for 30 seconds.</p>
           <button className="link" onClick={onResult}>Already submitted? View my result</button>
+          <TutorialButton />
         </div>
       </div>
     </div>
@@ -140,6 +141,7 @@ function Rules({ student, onProceed, onBack }) {
           </div>
         </div>
         <RulesList />
+        <TutorialButton />
         <button className="gatebtn" onClick={onProceed}>I understand — start exam →</button>
         <button className="link" onClick={onBack}>← Back</button>
       </div>
@@ -165,6 +167,108 @@ function RulesModal({ onClose }) {
         <button className="gatebtn compact" onClick={onClose}>Got it</button>
       </div>
     </div>
+  )
+}
+
+// ---- Tutorial: narrated slideshow of real app screens ("How to take this exam") --
+// `weight` ≈ spoken words in that segment; the player syncs slides to the audio
+// by proportional weight, so timing adapts to the actual narration duration.
+const TUT_BASE = import.meta.env.BASE_URL
+const TUTORIAL_SLIDES = [
+  { img: 's1-welcome.png', step: 'Step 1 · Sign in', weight: 20, caption: 'Enter your full name and email, then click Start exam.' },
+  { img: 's2-rules.png', step: 'Step 2 · Read the rules', weight: 34, caption: 'One attempt, the timer starts right away, and leaving the tab restarts the exam. Then click “I understand”.' },
+  { img: 's3-exam.png', step: 'Step 3 · The exam screen', weight: 41, caption: 'The scrambled question is on the left; your Python editor, a timer, a Rules button and a question slider are on the right.' },
+  { img: 's4-reveal.png', step: 'Step 4 · Read the question', weight: 31, caption: 'Hold the A button and press Ctrl+R together to turn it upright. Let go and it scrambles again.' },
+  { img: 's5-run.png', step: 'Step 5 · Write & run', weight: 33, caption: 'Type your Python, press ▶ Run to test it, and use the slider or Prev/Next to answer all four questions.' },
+  { img: 's6-done.png', step: 'Step 6 · Submit & results', weight: 41, caption: 'Submit, then save your code. Later use “View my result” with your email + code to see your marks.' },
+]
+
+function TutorialModal({ onClose }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [idx, setIdx] = useState(0)
+  const [t, setT] = useState(0)
+  const [dur, setDur] = useState(0)
+
+  // cumulative weight fraction where each slide ENDS
+  const total = TUTORIAL_SLIDES.reduce((a, s) => a + s.weight, 0)
+  const ends = []
+  { let acc = 0; for (const s of TUTORIAL_SLIDES) { acc += s.weight; ends.push(acc / total) } }
+  const startFrac = (i) => (i === 0 ? 0 : ends[i - 1])
+
+  const sync = () => {
+    const a = audioRef.current; if (!a) return
+    setT(a.currentTime); if (a.duration) setDur(a.duration)
+    const frac = a.duration ? a.currentTime / a.duration : 0
+    let i = ends.findIndex((b) => frac < b - 1e-6); if (i < 0) i = TUTORIAL_SLIDES.length - 1
+    setIdx(i)
+  }
+  const toggle = () => {
+    const a = audioRef.current; if (!a) return
+    if (a.paused) { a.play(); setPlaying(true) } else { a.pause(); setPlaying(false) }
+  }
+  const seek = (e) => {
+    const a = audioRef.current; if (!a || !a.duration) return
+    const r = e.currentTarget.getBoundingClientRect()
+    a.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * a.duration
+  }
+  const jumpTo = (i) => {
+    const a = audioRef.current; if (!a || !a.duration) return
+    a.currentTime = startFrac(i) * a.duration + 0.02
+    if (a.paused) { a.play(); setPlaying(true) }
+  }
+
+  useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    // opening the modal was a user gesture, so autoplay usually works; fall back to paused
+    const a = audioRef.current
+    if (a) a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+
+  const slide = TUTORIAL_SLIDES[idx]
+  const pct = dur ? (t / dur) * 100 : 0
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+  return (
+    <div className="modalback" onClick={onClose}>
+      <div className="tutcard" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="How to take this exam">
+        <div className="tuthead">
+          <b>▶ How to take this exam</b>
+          <button className="modalx" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="tutstage">
+          <img src={`${TUT_BASE}tutorial/${slide.img}`} alt={slide.step} />
+          <div className="tutcap"><span className="tutstep">{slide.step}</span>{slide.caption}</div>
+        </div>
+        <audio ref={audioRef} src={`${TUT_BASE}tutorial/narration.mp3`} preload="auto"
+          onTimeUpdate={sync} onLoadedMetadata={sync} onEnded={() => setPlaying(false)} />
+        <div className="tutbar">
+          <button className="tutplay" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+          <div className="tuttrack" onClick={seek}><span style={{ width: `${pct}%` }} /></div>
+          <span className="tuttime">{fmt(t)} / {fmt(dur || 72)}</span>
+        </div>
+        <div className="tutdots">
+          {TUTORIAL_SLIDES.map((s, i) => (
+            <button key={i} className={`tutdot${i === idx ? ' on' : ''}`} onClick={() => jumpTo(i)} title={s.step} aria-label={s.step} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// A button that opens the tutorial player. `variant="light"` for use on dark/red areas.
+function TutorialButton({ variant }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button className={`tutbtn${variant === 'light' ? ' light' : ''}`} onClick={() => setOpen(true)}>
+        ▶ How to take this exam
+      </button>
+      {open && <TutorialModal onClose={() => setOpen(false)} />}
+    </>
   )
 }
 

@@ -395,6 +395,67 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 @keyframes modalfade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalpop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 
+/* "How to take this exam" button */
+.tutbtn {
+  align-self: center; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700;
+  color: var(--accent); white-space: nowrap;
+  padding: 8px 16px; border-radius: 999px;
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  transition: background .18s, border-color .18s, transform .08s;
+}
+.tutbtn:hover { background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.5); }
+.tutbtn:active { transform: scale(.97); }
+
+/* tutorial player */
+.tutcard {
+  width: min(760px, 100%); max-height: 92vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 18px clamp(16px, 2.5vw, 22px);
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 30px 70px -20px rgba(120, 20, 20, 0.5);
+  animation: modalpop .24s cubic-bezier(.22, 1, .36, 1);
+}
+.tuthead { display: flex; align-items: center; justify-content: space-between; }
+.tuthead b { font-size: 16px; font-weight: 780; color: var(--ink); }
+.tutstage { display: flex; flex-direction: column; gap: 10px; }
+.tutstage img {
+  width: 100%; display: block; border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.3);
+  background: #f4f5f6;
+}
+.tutcap { font-size: 13px; line-height: 1.5; color: var(--ink); }
+.tutstep {
+  display: inline-block; margin-right: 8px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 750; color: #fff; vertical-align: middle;
+  background: linear-gradient(150deg, var(--accent), var(--accent-2));
+}
+.tutbar { display: flex; align-items: center; gap: 12px; }
+.tutplay {
+  flex: none; width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center; font-size: 13px; color: #fff; border: none;
+  background: linear-gradient(150deg, var(--accent), var(--accent-2));
+  box-shadow: 0 5px 14px rgba(220, 38, 38, 0.4);
+  transition: transform .1s;
+}
+.tutplay:active { transform: scale(.93); }
+.tuttrack {
+  flex: 1; height: 7px; border-radius: 999px; cursor: pointer;
+  background: rgba(0, 0, 0, 0.08); overflow: hidden;
+}
+.tuttrack span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s linear; }
+.tuttime { flex: none; font-size: 11.5px; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tutdots { display: flex; justify-content: center; gap: 8px; }
+.tutdot {
+  width: 9px; height: 9px; border-radius: 50%; cursor: pointer; padding: 0;
+  border: 1px solid rgba(220, 38, 38, 0.35); background: rgba(220, 38, 38, 0.12);
+  transition: background .2s, transform .15s, border-color .2s;
+}
+.tutdot:hover { background: rgba(220, 38, 38, 0.3); }
+.tutdot.on { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+
 .cardhead { display: flex; align-items: center; gap: 13px; }
 .cardhead h1 { font-size: 20px; margin: 0; font-weight: 750; letter-spacing: .2px; }
 .card h1 { font-size: 22px; margin: 0; font-weight: 760; }
