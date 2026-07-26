@@ -258,7 +258,7 @@ export default function ExamViewer({ slide, qIndex = 0, qTotal = 1 }) {
           {blocked && (
             <div className="lockscreen hard">
               <div className="guardcard">
-                <svg viewBox="0 0 24 24" width="34" height="34"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#8ee0b6" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#8ee0b6" /></svg>
+                <svg viewBox="0 0 24 24" width="34" height="34"><path d="M6 10V7a6 6 0 1112 0v3" fill="none" stroke="#fff" strokeWidth="2" /><rect x="4" y="10" width="16" height="10" rx="2" fill="#fff" /></svg>
                 <b>Screen locked</b>
                 <small>A screen-capture or window switch was detected. Content stays hidden for 30 seconds.</small>
                 <button className="resumebtn" onClick={resume} disabled={lockLeft > 0}>
