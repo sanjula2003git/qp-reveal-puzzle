@@ -71,11 +71,6 @@ function Welcome({ onStart, onResult }) {
             <h2>Python<br />Assessment</h2>
             <p>Read the brief, write your Python, run it in the browser, and submit. Calm focus — you have one attempt.</p>
           </div>
-          <ul className="herofeat">
-            <li><span className="fdot" />Anti-cheat reveal viewer</li>
-            <li><span className="fdot" />1&nbsp;h&nbsp;15&nbsp;m · one attempt per email</li>
-            <li><span className="fdot" />Run &amp; test Python live</li>
-          </ul>
         </aside>
 
         <div className="gateform">
