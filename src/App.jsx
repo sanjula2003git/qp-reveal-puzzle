@@ -178,17 +178,25 @@ const TUTORIAL_SLIDES = [
   { img: 's1-welcome.png', step: 'Step 1 · Sign in', weight: 20, caption: 'Enter your full name and email, then click Start exam.' },
   { img: 's2-rules.png', step: 'Step 2 · Read the rules', weight: 34, caption: 'One attempt, the timer starts right away, and leaving the tab restarts the exam. Then click “I understand”.' },
   { img: 's3-exam.png', step: 'Step 3 · The exam screen', weight: 41, caption: 'The scrambled question is on the left; your Python editor, a timer, a Rules button and a question slider are on the right.' },
-  { img: 's4-reveal.png', step: 'Step 4 · Read the question', weight: 31, caption: 'Hold the A button and press Ctrl+R together to turn it upright. Let go and it scrambles again.' },
+  { img: 's4-reveal.png', step: 'Step 4 · Read the question', weight: 39, caption: 'Click and hold the A button with your mouse 🖱️, and press Ctrl + R on your keyboard ⌨️ — both at the same time. Let go and it scrambles again.' },
   { img: 's5-run.png', step: 'Step 5 · Write & run', weight: 33, caption: 'Type your Python, press ▶ Run to test it, and use the slider or Prev/Next to answer all four questions.' },
   { img: 's6-done.png', step: 'Step 6 · Submit & results', weight: 41, caption: 'Submit, then save your code. Later use “View my result” with your email + code to see your marks.' },
 ]
 
 function TutorialModal({ onClose }) {
   const audioRef = useRef(null)
+  const cardRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [idx, setIdx] = useState(0)
   const [t, setT] = useState(0)
   const [dur, setDur] = useState(0)
+  const [isFs, setIsFs] = useState(false)
+
+  const toggleFs = () => {
+    const el = cardRef.current; if (!el) return
+    if (document.fullscreenElement) document.exitFullscreen?.()
+    else el.requestFullscreen?.()
+  }
 
   // cumulative weight fraction where each slide ENDS
   const total = TUTORIAL_SLIDES.reduce((a, s) => a + s.weight, 0)
@@ -219,12 +227,18 @@ function TutorialModal({ onClose }) {
   }
 
   useEffect(() => {
-    const k = (e) => { if (e.key === 'Escape') onClose() }
+    // Esc exits fullscreen first (browser default); only close the modal when not fullscreen
+    const k = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) onClose() }
+    const onFs = () => setIsFs(!!document.fullscreenElement)
     window.addEventListener('keydown', k)
+    document.addEventListener('fullscreenchange', onFs)
     // opening the modal was a user gesture, so autoplay usually works; fall back to paused
     const a = audioRef.current
     if (a) a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
-    return () => window.removeEventListener('keydown', k)
+    return () => {
+      window.removeEventListener('keydown', k)
+      document.removeEventListener('fullscreenchange', onFs)
+    }
   }, [onClose])
 
   const slide = TUTORIAL_SLIDES[idx]
@@ -233,10 +247,13 @@ function TutorialModal({ onClose }) {
 
   return (
     <div className="modalback" onClick={onClose}>
-      <div className="tutcard" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="How to take this exam">
+      <div className={`tutcard${isFs ? ' fs' : ''}`} ref={cardRef} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="How to take this exam">
         <div className="tuthead">
           <b>▶ How to take this exam</b>
-          <button className="modalx" onClick={onClose} aria-label="Close">✕</button>
+          <div className="tutheadbtns">
+            <button className="modalx" onClick={toggleFs} aria-label={isFs ? 'Exit fullscreen' : 'Fullscreen'} title={isFs ? 'Exit fullscreen' : 'Fullscreen'}>{isFs ? '🡼' : '⛶'}</button>
+            {!isFs && <button className="modalx" onClick={onClose} aria-label="Close">✕</button>}
+          </div>
         </div>
         <div className="tutstage">
           <img src={`${TUT_BASE}tutorial/${slide.img}`} alt={slide.step} />
@@ -247,7 +264,7 @@ function TutorialModal({ onClose }) {
         <div className="tutbar">
           <button className="tutplay" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
           <div className="tuttrack" onClick={seek}><span style={{ width: `${pct}%` }} /></div>
-          <span className="tuttime">{fmt(t)} / {fmt(dur || 72)}</span>
+          <span className="tuttime">{fmt(t)} / {fmt(dur || 77)}</span>
         </div>
         <div className="tutdots">
           {TUTORIAL_SLIDES.map((s, i) => (
