@@ -149,21 +149,26 @@ function Rules({ student, onProceed, onBack }) {
   )
 }
 
-// A dismissible popup showing the rules — toggled from a button during the exam.
+// A dismissible popup showing the rules AND the walkthrough video — toggled from
+// a button during the exam, so both stay reachable at any time. The video starts
+// paused here (nobody wants narration blaring mid-exam).
 function RulesModal({ onClose }) {
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    // Esc exits fullscreen first (browser default); only close when not fullscreen
+    const onKey = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   return (
     <div className="modalback" onClick={onClose}>
-      <div className="modalcard" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Exam rules">
+      <div className="modalcard wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Exam rules">
         <div className="modalhead">
           <b>Exam rules</b>
           <button className="modalx" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <RulesList />
+        <div className="modalsep"><span>▶ Video walkthrough</span></div>
+        <TutorialPlayer />
         <button className="gatebtn compact" onClick={onClose}>Got it</button>
       </div>
     </div>
@@ -185,9 +190,11 @@ const TUTORIAL_SLIDES = [
   { img: 's6-done.png', step: 'Step 6 · Submit & results', weight: 52, caption: 'Click Submit once — that’s the only thing that saves your answers to the sheet. You’ll get a personal code: save it, then use “View my result” with your email + code to see your marks.' },
 ]
 
-function TutorialModal({ onClose }) {
+// The narrated slideshow itself. Used standalone inside TutorialModal and
+// embedded inside the in-exam Rules popup, so it owns its own fullscreen toggle.
+function TutorialPlayer({ autoPlay = false }) {
   const audioRef = useRef(null)
-  const cardRef = useRef(null)
+  const wrapRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [idx, setIdx] = useState(0)
   const [t, setT] = useState(0)
@@ -195,7 +202,7 @@ function TutorialModal({ onClose }) {
   const [isFs, setIsFs] = useState(false)
 
   const toggleFs = () => {
-    const el = cardRef.current; if (!el) return
+    const el = wrapRef.current; if (!el) return
     if (document.fullscreenElement) document.exitFullscreen?.()
     else el.requestFullscreen?.()
   }
@@ -229,50 +236,60 @@ function TutorialModal({ onClose }) {
   }
 
   useEffect(() => {
-    // Esc exits fullscreen first (browser default); only close the modal when not fullscreen
-    const k = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) onClose() }
-    const onFs = () => setIsFs(!!document.fullscreenElement)
-    window.addEventListener('keydown', k)
+    const onFs = () => setIsFs(document.fullscreenElement === wrapRef.current)
     document.addEventListener('fullscreenchange', onFs)
     // opening the modal was a user gesture, so autoplay usually works; fall back to paused
     const a = audioRef.current
-    if (a) a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+    if (autoPlay && a) a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
     return () => {
-      window.removeEventListener('keydown', k)
       document.removeEventListener('fullscreenchange', onFs)
+      a?.pause()   // stop the narration when the player is closed / hidden
     }
-  }, [onClose])
+  }, [autoPlay])
 
   const slide = TUTORIAL_SLIDES[idx]
   const pct = dur ? (t / dur) * 100 : 0
   const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
   return (
+    <div className={`tutplayer${isFs ? ' fs' : ''}`} ref={wrapRef}>
+      <div className="tutstage">
+        <img src={`${TUT_BASE}tutorial/${slide.img}`} alt={slide.step} />
+        <div className="tutcap"><span className="tutstep">{slide.step}</span>{slide.caption}</div>
+      </div>
+      <audio ref={audioRef} src={`${TUT_BASE}tutorial/narration.mp3`} preload="auto"
+        onTimeUpdate={sync} onLoadedMetadata={sync} onEnded={() => setPlaying(false)} />
+      <div className="tutbar">
+        <button className="tutplay" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+        <div className="tuttrack" onClick={seek}><span style={{ width: `${pct}%` }} /></div>
+        <span className="tuttime">{fmt(t)} / {fmt(dur || 109)}</span>
+        <button className="modalx" onClick={toggleFs} aria-label={isFs ? 'Exit fullscreen' : 'Fullscreen'} title={isFs ? 'Exit fullscreen' : 'Fullscreen'}>{isFs ? '🡼' : '⛶'}</button>
+      </div>
+      <div className="tutdots">
+        {TUTORIAL_SLIDES.map((s, i) => (
+          <button key={i} className={`tutdot${i === idx ? ' on' : ''}`} onClick={() => jumpTo(i)} title={s.step} aria-label={s.step} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TutorialModal({ onClose }) {
+  useEffect(() => {
+    // Esc exits fullscreen first (browser default); only close the modal when not fullscreen
+    const k = (e) => { if (e.key === 'Escape' && !document.fullscreenElement) onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+
+  return (
     <div className="modalback" onClick={onClose}>
-      <div className={`tutcard${isFs ? ' fs' : ''}`} ref={cardRef} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="How to take this exam">
+      <div className="tutcard" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="How to take this exam">
         <div className="tuthead">
           <b>▶ How to take this exam</b>
-          <div className="tutheadbtns">
-            <button className="modalx" onClick={toggleFs} aria-label={isFs ? 'Exit fullscreen' : 'Fullscreen'} title={isFs ? 'Exit fullscreen' : 'Fullscreen'}>{isFs ? '🡼' : '⛶'}</button>
-            {!isFs && <button className="modalx" onClick={onClose} aria-label="Close">✕</button>}
-          </div>
+          <button className="modalx" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <div className="tutstage">
-          <img src={`${TUT_BASE}tutorial/${slide.img}`} alt={slide.step} />
-          <div className="tutcap"><span className="tutstep">{slide.step}</span>{slide.caption}</div>
-        </div>
-        <audio ref={audioRef} src={`${TUT_BASE}tutorial/narration.mp3`} preload="auto"
-          onTimeUpdate={sync} onLoadedMetadata={sync} onEnded={() => setPlaying(false)} />
-        <div className="tutbar">
-          <button className="tutplay" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
-          <div className="tuttrack" onClick={seek}><span style={{ width: `${pct}%` }} /></div>
-          <span className="tuttime">{fmt(t)} / {fmt(dur || 109)}</span>
-        </div>
-        <div className="tutdots">
-          {TUTORIAL_SLIDES.map((s, i) => (
-            <button key={i} className={`tutdot${i === idx ? ' on' : ''}`} onClick={() => jumpTo(i)} title={s.step} aria-label={s.step} />
-          ))}
-        </div>
+        <TutorialPlayer autoPlay />
       </div>
     </div>
   )
